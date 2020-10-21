@@ -3,7 +3,7 @@ package midi
 
 // Packet is a MIDI packet.
 type Packet struct {
-	Data [3]byte
+	Data []byte
 	Err  error
 }
 

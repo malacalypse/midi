@@ -26,29 +26,33 @@ struct Midi {
 Midi_open_result Midi_open(MIDIEndpointRef input, MIDIEndpointRef output) {
 	Midi     midi;
 	OSStatus rc;
-	
+
 	NEW(midi);
 
 	midi->input  = input;
 	midi->output = output;
 
-	rc = MIDIClientCreate(CFSTR("scgolang"), NULL, NULL, &midi->client);
+	rc = MIDIClientCreate(CFSTR("gomidi"), NULL, NULL, &midi->client);
 	if (rc != 0) {
-		return (Midi_open_result) { .midi = NULL, .error = rc };
+		FREE(midi);
+		return (Midi_open_result) { .midi = NULL, .error = rc, .loc = 1 };
 	}
-	rc = MIDIInputPortCreate(midi->client, CFSTR("scgolang input"), Midi_read_proc, NULL, &midi->inputPort);
+	rc = MIDIInputPortCreate(midi->client, CFSTR("gomidi input"), Midi_read_proc, NULL, &midi->inputPort);
 	if (rc != 0) {
-		return (Midi_open_result) { .midi = NULL, .error = rc };
+		FREE(midi);
+		return (Midi_open_result) { .midi = NULL, .error = rc, .loc = 2 };
 	}
-	rc = MIDIOutputPortCreate(midi->client, CFSTR("scgolang output"), &midi->outputPort);
+	rc = MIDIOutputPortCreate(midi->client, CFSTR("gomidi output"), &midi->outputPort);
 	if (rc != 0) {
-		return (Midi_open_result) { .midi = NULL, .error = rc };
+		FREE(midi);
+		return (Midi_open_result) { .midi = NULL, .error = rc, .loc = 3 };
 	}
 	rc = MIDIPortConnectSource(midi->inputPort, input, midi);
 	if (rc != 0) {
-		return (Midi_open_result) { .midi = NULL, .error = rc };
+		FREE(midi);
+		return (Midi_open_result) { .midi = NULL, .error = rc, .loc = 4 };
 	}
-	return (Midi_open_result) { .midi =  midi, .error = 0 };
+	return (Midi_open_result) { .midi =  midi, .error = 0, .loc = 5 };
 }
 
 // Midi_read_proc is the callback that gets invoked when MIDI data comes int.

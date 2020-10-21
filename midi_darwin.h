@@ -20,6 +20,7 @@ typedef struct Midi *Midi;
 typedef struct Midi_open_result {
 	Midi     midi;
 	OSStatus error;
+	int      loc;
 } Midi_open_result;
 
 typedef struct Midi_device_endpoints {

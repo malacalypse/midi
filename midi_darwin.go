@@ -8,6 +8,7 @@ package midi
 import "C"
 
 import (
+	"fmt"
 	"sync"
 	"unsafe"
 
@@ -20,8 +21,8 @@ var (
 )
 
 var (
-	packetChans      = map[*Device]chan []Packet{}
-	packetChansMutex sync.RWMutex
+	connectionMutex  sync.RWMutex
+	connectedDevices = map[*Device]chan []byte{}
 )
 
 // Device provides an interface for MIDI devices.
@@ -43,32 +44,34 @@ type Device struct {
 func (d *Device) Open() error {
 	result := C.Midi_open(d.input, d.output)
 	if result.error != 0 {
+		fmt.Println("Error: ", result.error, result.loc)
 		return coreMidiError(result.error)
 	}
 	d.conn = result.midi
-	packetChansMutex.Lock()
-	packetChans[d] = make(chan []Packet, d.QueueSize)
-	packetChansMutex.Unlock()
+	connectionMutex.Lock()
+	connectedDevices[d] = make(chan []byte)
+	connectionMutex.Unlock()
 	return nil
 }
 
 // Close closes the connection to the MIDI device.
 func (d *Device) Close() error {
+	connectionMutex.Lock()
+	connectedDevices[d] = nil
+	connectionMutex.Unlock()
 	return coreMidiError(C.OSStatus(C.Midi_close(d.conn)))
 }
 
-// Packets emits MIDI packets.
+// Returns the device's channel for streaming raw MIDI bytes
 // If the device has not been opened it will return ErrNotOpen.
-func (d *Device) Packets() (<-chan []Packet, error) {
-	packetChansMutex.RLock()
-	for device, packetChan := range packetChans {
-		if d.conn == device.conn {
-			packetChansMutex.RUnlock()
-			return packetChan, nil
-		}
+func (d *Device) ReadChan() (<-chan []byte, error) {
+	connectionMutex.RLock()
+	defer connectionMutex.RUnlock()
+
+	if connectedDevices[d] == nil {
+		return nil, ErrNotOpen
 	}
-	packetChansMutex.RUnlock()
-	return nil, ErrNotOpen
+	return connectedDevices[d], nil
 }
 
 // Write writes data to a MIDI device.
@@ -82,32 +85,24 @@ func (d *Device) Write(buf []byte) (int, error) {
 
 //export SendPacket
 func SendPacket(conn C.Midi, pkt *C.MIDIPacket) {
-	var ch chan []Packet
-
-	packetChansMutex.RLock()
-	for device, packetChan := range packetChans {
+	var ch chan []byte
+	// Attempt to identify connected device from C.Midi
+	connectionMutex.RLock()
+	for device, channel := range connectedDevices {
 		if device.conn == conn {
-			ch = packetChan
+			ch = channel
 		}
-		break
 	}
-	packetChansMutex.RUnlock()
+	connectionMutex.RUnlock()
 
 	if ch == nil {
 		return
 	}
-	var pkts []Packet
-
-	for i := C.UInt16(0); i < (pkt.length / 3); i++ {
-		pkts = append(pkts, Packet{
-			Data: [3]byte{
-				byte(pkt.data[(i*3)+0]),
-				byte(pkt.data[(i*3)+1]),
-				byte(pkt.data[(i*3)+2]),
-			},
-		})
+	data := make([]byte, 0, int(pkt.length))
+	for i := 0; i < int(pkt.length); i++ {
+		data = append(data, byte(pkt.data[i]))
 	}
-	ch <- pkts
+	ch <- data
 }
 
 // coreMidiError maps a CoreMIDI error code to a Go error.
